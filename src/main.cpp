@@ -13,6 +13,7 @@
 using namespace std;
 
 #define POINTS_FREQ 0.02
+#define LANE_WIDTH 4 //in meters
 
 // for convenience
 using json = nlohmann::json;
@@ -342,6 +343,37 @@ vector<vector<double>> calculateNextValues(const vector<double> & previous_path_
 	return {next_x_values,next_y_values};
 } 
 
+
+
+double getTargetVelocity(const vector<vector<double>> & sensor_fusion,double ref_velocity,double car_s, uint lane, uint prev_size)
+{
+	double result = ref_velocity;
+	//scan all cars in sensor fusion
+	for( auto sensced_car : sensor_fusion)
+	{
+		double d = sensced_car[6];
+		//if car is in our lane - we will check if it is too close
+		if((d<(LANE_WIDTH/2+LANE_WIDTH*lane+LANE_WIDTH/2))&&(d<(LANE_WIDTH/2+LANE_WIDTH*lane-LANE_WIDTH/2)))
+		{
+			double vx = sensced_car[3];
+			double vy = sensced_car[4];
+
+			double check_speed = sqrt(vx*vx+vy*vy);
+			double check_car_s = sensced_car[5];
+
+			//predictin where sensced car will be when the previous plan end
+			check_car_s +=((double)prev_size*POINTS_FREQ*check_speed);
+#define SAFE_DISTANCE 30
+			if((check_car_s> car_s)&& ((check_car_s - car_s) < SAFE_DISTANCE))
+			{
+				result /= 2;
+				break;
+			}
+		}
+	}
+	return result;
+}
+
 int main()
 {
 	uWS::Hub h;
@@ -382,9 +414,9 @@ int main()
 	}
 
 	uint lane = 1;							//Start lane
-	double ref_valocity = 49.5; //mph
+	double ref_velocity = 49.5; //mph
 
-	h.onMessage([&map_waypoints_x, &map_waypoints_y, &map_waypoints_s, &map_waypoints_dx, &map_waypoints_dy,lane,ref_valocity](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
+	h.onMessage([&map_waypoints_x, &map_waypoints_y, &map_waypoints_s, &map_waypoints_dx, &map_waypoints_dy,lane,ref_velocity](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
 																																																					 uWS::OpCode opCode) {
 		// "42" at the start of the message means there's a websocket message event.
 		// The 4 signifies a websocket message
@@ -422,10 +454,16 @@ int main()
 					double end_path_d = j[1]["end_path_d"];
 
 					// Sensor Fusion Data, a list of all other cars on the same side of the road.
-					auto sensor_fusion = j[1]["sensor_fusion"];
+					vector<vector<double>> sensor_fusion = j[1]["sensor_fusion"];
 
 					uint previous_size = previous_path_x.size();
 
+					if(previous_size >0 )
+					{
+						car_s = end_path_s;
+					}
+
+					double target_velocity = getTargetVelocity(sensor_fusion,ref_velocity,car_s,lane,previous_size);
 					// List of way points for path
 
 					vector<double> anchor_points_x;
@@ -448,7 +486,7 @@ int main()
 					alignPointsWithRef( ref_x, ref_y, ref_yaw, anchor_points_x, anchor_points_y);
 
 					vector<vector<double>> next_values = 
-						calculateNextValues(previous_path_x,previous_path_y,anchor_points_x,anchor_points_y,ref_x,ref_y,ref_yaw,ref_valocity/2.24);
+						calculateNextValues(previous_path_x,previous_path_y,anchor_points_x,anchor_points_y,ref_x,ref_y,ref_yaw,target_velocity/2.24);
 
 					json msgJson;
 					msgJson["next_x"] = next_values[0];
