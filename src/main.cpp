@@ -14,6 +14,10 @@ using namespace std;
 
 #define POINTS_FREQ 0.02
 #define LANE_WIDTH 4 //in meters
+#define MAX_LEGAL_VELOCITY 49.5
+#define SPEED_INCREMENT 0.224
+#define INITIAL_SPPED 5
+#define SAFE_DISTANCE 30
 
 // for convenience
 using json = nlohmann::json;
@@ -253,7 +257,7 @@ void addSpacedPoints(const vector<double> & map_waypoints_x,
 	}
 	for(uint i =0; i< anchor_points_x.size();i++)
 	{
-		cout << __FUNCTION__<< ":" << anchor_points_x[i] << "::" << anchor_points_y[i] << std::endl;
+		//cout << __FUNCTION__<< ":" << anchor_points_x[i] << "::" << anchor_points_y[i] << std::endl;
 	
 	}
 	
@@ -278,7 +282,7 @@ void alignPointsWithRef( double ref_x,
 		anchor_points_x[i] = (x_shift*cos(0-ref_yaw)) - (y_shift*sin(0-ref_yaw));
 		anchor_points_y[i] = (x_shift*sin(0-ref_yaw)) + (y_shift*cos(0-ref_yaw));
 
-		cout << __FUNCTION__<< ":" << anchor_points_x[i] << "::" << anchor_points_y[i] << "  ref  :"<< ref_x << ',' << ref_y << ',' << ref_yaw << std::endl;
+		//cout << __FUNCTION__<< ":" << anchor_points_x[i] << "::" << anchor_points_y[i] << "  ref  :"<< ref_x << ',' << ref_y << ',' << ref_yaw << std::endl;
 	}
 }
 
@@ -345,15 +349,15 @@ vector<vector<double>> calculateNextValues(const vector<double> & previous_path_
 
 
 
-double getTargetVelocity(const vector<vector<double>> & sensor_fusion,double ref_velocity,double car_s, uint lane, uint prev_size)
+
+bool isTooClose(const vector<vector<double>> & sensor_fusion, double car_s, uint lane, uint prev_size)
 {
-	double result = ref_velocity;
 	//scan all cars in sensor fusion
 	for( auto sensced_car : sensor_fusion)
 	{
 		double d = sensced_car[6];
 		//if car is in our lane - we will check if it is too close
-		if((d<(LANE_WIDTH/2+LANE_WIDTH*lane+LANE_WIDTH/2))&&(d<(LANE_WIDTH/2+LANE_WIDTH*lane-LANE_WIDTH/2)))
+		if((d<(LANE_WIDTH/2+LANE_WIDTH*lane+LANE_WIDTH/2))&&(d>(LANE_WIDTH/2+LANE_WIDTH*lane-LANE_WIDTH/2)))
 		{
 			double vx = sensced_car[3];
 			double vy = sensced_car[4];
@@ -363,15 +367,14 @@ double getTargetVelocity(const vector<vector<double>> & sensor_fusion,double ref
 
 			//predictin where sensced car will be when the previous plan end
 			check_car_s +=((double)prev_size*POINTS_FREQ*check_speed);
-#define SAFE_DISTANCE 30
+
 			if((check_car_s> car_s)&& ((check_car_s - car_s) < SAFE_DISTANCE))
 			{
-				result /= 2;
-				break;
+				return true;
 			}
 		}
 	}
-	return result;
+	return false;;
 }
 
 int main()
@@ -413,16 +416,20 @@ int main()
 		map_waypoints_dy.push_back(d_y);
 	}
 
-	uint lane = 1;							//Start lane
-	double ref_velocity = 49.5; //mph
+	
+	double ref_velocity = 0; //mph
+	uint 	lane = 1;		//Start lane
 
-	h.onMessage([&map_waypoints_x, &map_waypoints_y, &map_waypoints_s, &map_waypoints_dx, &map_waypoints_dy,lane,ref_velocity](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
+	h.onMessage([&ref_velocity,&map_waypoints_x, &map_waypoints_y, &map_waypoints_s, &map_waypoints_dx, &map_waypoints_dy,&lane](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
 																																																					 uWS::OpCode opCode) {
 		// "42" at the start of the message means there's a websocket message event.
 		// The 4 signifies a websocket message
 		// The 2 signifies a websocket event
 		//auto sdata = string(data).substr(0, length);
 		//cout << sdata << endl;
+
+		
+		
 		if (length && length > 2 && data[0] == '4' && data[1] == '2')
 		{
 
@@ -462,8 +469,15 @@ int main()
 					{
 						car_s = end_path_s;
 					}
-
-					double target_velocity = getTargetVelocity(sensor_fusion,ref_velocity,car_s,lane,previous_size);
+					
+					if (isTooClose(sensor_fusion,car_s,lane,previous_size))
+					{
+						ref_velocity -= SPEED_INCREMENT;
+					}
+					else if(ref_velocity < MAX_LEGAL_VELOCITY)
+					{
+						ref_velocity += SPEED_INCREMENT;
+					}
 					// List of way points for path
 
 					vector<double> anchor_points_x;
@@ -476,17 +490,15 @@ int main()
 					// set the first two points 
 					setInitialPoints(previous_path_x, previous_path_y, anchor_points_x,anchor_points_y,ref_x,ref_y,ref_yaw);
 					
-					//update ref S
-					vector<double> ref_sd = getFrenet(ref_x, ref_y, ref_yaw, map_waypoints_x,map_waypoints_y);
 					// add 3 points evenly spaced 30 m 
-					addSpacedPoints(map_waypoints_x, map_waypoints_y, map_waypoints_s, 3, 30.0,lane,car_s/*ref_sd[0]*/,anchor_points_x,anchor_points_y);
+					addSpacedPoints(map_waypoints_x, map_waypoints_y, map_waypoints_s, 3, 30.0,lane,car_s,anchor_points_x,anchor_points_y);
 				
 					
 					// transform the points according to refference point to simplify math of calculating spline
 					alignPointsWithRef( ref_x, ref_y, ref_yaw, anchor_points_x, anchor_points_y);
 
 					vector<vector<double>> next_values = 
-						calculateNextValues(previous_path_x,previous_path_y,anchor_points_x,anchor_points_y,ref_x,ref_y,ref_yaw,target_velocity/2.24);
+						calculateNextValues(previous_path_x,previous_path_y,anchor_points_x,anchor_points_y,ref_x,ref_y,ref_yaw,ref_velocity/2.24);
 
 					json msgJson;
 					msgJson["next_x"] = next_values[0];
