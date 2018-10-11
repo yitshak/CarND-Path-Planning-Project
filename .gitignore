@@ -1,0 +1,3 @@
+build/*
+src/.main.cpp.swp
+src/.vscode/settings.json
