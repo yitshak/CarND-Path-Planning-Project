@@ -350,35 +350,6 @@ vector<vector<double>> calculateNextValues(const vector<double> & previous_path_
 } 
 
 
-
-
-bool isTooClose(const vector<vector<double>> & sensor_fusion, double car_s, uint lane, uint prev_size)
-{
-	//scan all cars in sensor fusion
-	for( auto sensced_car : sensor_fusion)
-	{
-		double d = sensced_car[6];
-		//if car is in our lane - we will check if it is too close
-		if((d<(LANE_WIDTH/2+LANE_WIDTH*lane+LANE_WIDTH/2))&&(d>(LANE_WIDTH/2+LANE_WIDTH*lane-LANE_WIDTH/2)))
-		{
-			double vx = sensced_car[3];
-			double vy = sensced_car[4];
-
-			double check_speed = sqrt(vx*vx+vy*vy);
-			double check_car_s = sensced_car[5];
-
-			//predictin where sensced car will be when the previous plan end
-			check_car_s +=((double)prev_size*POINTS_FREQ*check_speed);
-
-			if((check_car_s> car_s)&& ((check_car_s - car_s) < SAFE_DISTANCE))
-			{
-				return true;
-			}
-		}
-	}
-	return false;;
-}
-
 int main()
 {
 	uWS::Hub h;
@@ -394,6 +365,10 @@ int main()
 	string map_file_ = "../data/highway_map.csv";
 	// The max s value before wrapping around the track back to 0
 	double max_s = 6945.554;
+
+	double ref_velocity = 0; //mph
+	uint 	lane = 1;		//Start lane
+	DrivingStateMachine stateMachine;
 
 	ifstream in_map_(map_file_.c_str(), ifstream::in);
 
@@ -419,10 +394,9 @@ int main()
 	}
 
 	
-	double ref_velocity = 0; //mph
-	uint 	lane = 1;		//Start lane
+	
 
-	h.onMessage([&ref_velocity,&map_waypoints_x, &map_waypoints_y, &map_waypoints_s, &map_waypoints_dx, &map_waypoints_dy,&lane](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
+	h.onMessage([&stateMachine, &ref_velocity,&map_waypoints_x, &map_waypoints_y, &map_waypoints_s, &map_waypoints_dx, &map_waypoints_dy,&lane](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
 																																																					 uWS::OpCode opCode) {
 		// "42" at the start of the message means there's a websocket message event.
 		// The 4 signifies a websocket message
@@ -470,16 +444,14 @@ int main()
 					if(previous_size >0 )
 					{
 						car_s = end_path_s;
+						car_d = end_path_d;
 					}
 					
-					if (isTooClose(sensor_fusion,car_s,lane,previous_size))
-					{
-						ref_velocity -= SPEED_INCREMENT;
-					}
-					else if(ref_velocity < MAX_LEGAL_VELOCITY)
-					{
-						ref_velocity += SPEED_INCREMENT;
-					}
+					stateMachine.UpdateSensorFusion(sensor_fusion,car_s,car_d,previous_size);
+					ref_velocity = stateMachine.GetTargetVelocity();
+					lane = stateMachine.GetTargetLane();
+					
+					
 					// List of way points for path
 
 					vector<double> anchor_points_x;
