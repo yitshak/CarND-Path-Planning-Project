@@ -10,6 +10,8 @@
 #include "json.hpp"
 #include "spline.h"
 
+#include "DrivingStateMachine.h"
+
 using namespace std;
 
 #define POINTS_FREQ 0.02
