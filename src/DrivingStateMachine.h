@@ -43,25 +43,30 @@ class DrivingStateMachine{
 public:
 
     DrivingStateMachine(uint initialLane = 1, uint numberOfLanes = 3);
-    void UpdateSensorFusion(vector<vector<double>> sensorFusion, double car_s,double car_d,uint prevPlanLeftover);
+    void UpdateSensorFusion(vector<vector<double>> & sensorFusion, double car_s,double car_d,uint prevPlanLeftover);
     double GetTargetVelocity(void) const;
     uint   GetTargetLane(void) const;
 
 private:
 
+    bool LaneIsClear(vector<vector<double>> & sensorFusion, double car_s, uint prevPlanLeftove, uint lane, double safeDistance ) const;
+    bool LaneSwitchIsSafe(vector<vector<double>> & sensorFusion, double car_s, uint prevPlanLeftove, uint lane, double safeDistance ) const;
+
+    void HandleObstcaleInSwitching(vector<vector<double>> & sensorFusion, double car_s,double car_d,uint prevPlanLeftover);
+    void HandleObstcaleInKeepLane(vector<vector<double>> & sensorFusion, double car_s,double car_d,uint prevPlanLeftover);
+
+
     const double  POINTS_FREQ = 0.02;
     const double  LANE_WIDTH = 4.0; //in meters
-    const double  MAX_LEGAL_VELOCITY = 49.5;
-    const double  SPEED_INCREMENT = 0.224;
-    const double  INITIAL_SPPED = 5.0;
-    const double  SAFE_DISTANCE = 30;
+    const double  MAX_LEGAL_VELOCITY = 49.0;
+    const double  SPEED_INCREMENT = 1.0;
+    const double  INITIAL_SPPED = 0.0;
+    const double  SAFE_DISTANCE = 30; //in meters
 
     enum DrivingStates{
         KEEP_LANE,
         SWITCH_LANE_RIGHT,
-        SWITCH_LANE_LEFT,
-        PREPARE_SWITCH_LANE_RIGHT,
-        PREPARE_SWITCH_LANE_LEFT,
+        SWITCH_LANE_LEFT
     };
 
     DrivingStates state_;
@@ -70,6 +75,8 @@ private:
     uint numberOfLanes_;
 
     double referenceVelocity_;
+
+       
 };
 
 
@@ -78,17 +85,64 @@ DrivingStateMachine::DrivingStateMachine(uint initialLane, uint numberOfLanes)
     currentLane_ = targetLane_ = initialLane;
     numberOfLanes_ = numberOfLanes;
     referenceVelocity_ = DrivingStateMachine::INITIAL_SPPED;
+    state_ = KEEP_LANE;
 };
-    
-void DrivingStateMachine::UpdateSensorFusion(vector<vector<double>> sensorFusion, double car_s,double car_d,uint prevPlanLeftover)
+void DrivingStateMachine::UpdateSensorFusion(vector<vector<double>> & sensorFusion, double car_s,double car_d,uint prevPlanLeftover)
 {
-    bool collision = false;
+    bool obstacleDetected = false;
+
+    // Check if we finished switching lane
+    if(state_ == DrivingStates::SWITCH_LANE_LEFT || state_ == DrivingStates::SWITCH_LANE_RIGHT )
+    {
+         if((car_d<(LANE_WIDTH/2+LANE_WIDTH*targetLane_+LANE_WIDTH/3))&&(car_d>(LANE_WIDTH/2+LANE_WIDTH*targetLane_-LANE_WIDTH/3)))
+        {
+ 
+            currentLane_ = targetLane_;
+        }  
+     }
+
+ 	if (!LaneIsClear(sensorFusion,car_s,prevPlanLeftover,targetLane_,SAFE_DISTANCE))
+    {
+        
+        switch(state_){
+            case DrivingStates::SWITCH_LANE_LEFT:
+            case DrivingStates::SWITCH_LANE_RIGHT:
+            {
+                // Swirl back to original lane (current lane)
+                // switching back to KEEP LANE state
+                HandleObstcaleInSwitching(sensorFusion, car_s, car_d, prevPlanLeftover);
+                cout << __FUNCTION__ << ":" <<__LINE__<<std::endl;
+                break;
+            }
+            case DrivingStates::KEEP_LANE:
+            {
+                // Reduce speed - move to PREPARE_SWITCH_LANE_
+                // switching back to KEEP LANE state
+                cerr << __FUNCTION__ << ":" <<__LINE__<<std::endl;
+                HandleObstcaleInKeepLane(sensorFusion, car_s, car_d, prevPlanLeftover);
+                break;
+            }
+            
+          }
+            
+    }
+    else if(referenceVelocity_ < DrivingStateMachine::MAX_LEGAL_VELOCITY )
+    {
+        cout << __FUNCTION__ << ":" <<__LINE__<<std::endl;
+        referenceVelocity_ += DrivingStateMachine::SPEED_INCREMENT;
+    }
+   
+    
+}
+
+bool DrivingStateMachine::LaneIsClear(vector<vector<double>> & sensorFusion, double car_s, uint prevPlanLeftover, uint lane,double safeDistance ) const
+{
     //scan all cars in sensor fusion
 	for( auto sensced_car : sensorFusion)
 	{
 		double d = sensced_car[6];
-		//if car is in our lane - we will check if it is too close
-		if((d<(LANE_WIDTH/2+LANE_WIDTH*currentLane_+LANE_WIDTH/2))&&(d>(LANE_WIDTH/2+LANE_WIDTH*currentLane_-LANE_WIDTH/2)))
+		//if car is in our target lane - we will check if it is too close
+		if((d<(LANE_WIDTH/2+LANE_WIDTH*lane+LANE_WIDTH/2))&&(d>(LANE_WIDTH/2+LANE_WIDTH*lane-LANE_WIDTH/2)))
 		{
 			double vx = sensced_car[3];
 			double vy = sensced_car[4];
@@ -99,21 +153,75 @@ void DrivingStateMachine::UpdateSensorFusion(vector<vector<double>> sensorFusion
 			//predictin where sensced car will be when the previous plan end
 			check_car_s +=((double)prevPlanLeftover*POINTS_FREQ*check_speed);
 
-			if((check_car_s> car_s)&& ((check_car_s - car_s) < DrivingStateMachine::SAFE_DISTANCE))
+			if((check_car_s> car_s)&& ((check_car_s - car_s) < safeDistance))
 			{
-				collision =  true;
+				return  false;
 			}
 		}
 	}
-	if (collision)
+    return true;
+}
+
+bool DrivingStateMachine::LaneSwitchIsSafe(vector<vector<double>> & sensorFusion, double car_s, uint prevPlanLeftover, uint lane,double safeDistance ) const
+{
+    //scan all cars in sensor fusion
+	for( auto sensced_car : sensorFusion)
+	{
+		double d = sensced_car[6];
+		//if car is in our target lane - we will check if it is too close
+		if((d<(LANE_WIDTH/2+LANE_WIDTH*lane+LANE_WIDTH/2))&&(d>(LANE_WIDTH/2+LANE_WIDTH*lane-LANE_WIDTH/2)))
+		{
+			double vx = sensced_car[3];
+			double vy = sensced_car[4];
+
+			double check_speed = sqrt(vx*vx+vy*vy);
+			double check_car_s = sensced_car[5];
+
+			//predictin where sensced car will be when the previous plan end
+			check_car_s +=((double)prevPlanLeftover*POINTS_FREQ*check_speed);
+
+			if(((check_car_s> car_s)&& ((check_car_s - car_s) < safeDistance))||
+                    ((check_car_s<= car_s)&& (( car_s- check_car_s) < safeDistance/4)))
+			{
+				return  false;
+			}
+		}
+	}
+    return true;
+}
+void DrivingStateMachine::HandleObstcaleInKeepLane(vector<vector<double>> & sensorFusion, double car_s,double car_d,uint prevPlanLeftover)
+{
+    // In case of an obstacle in current  lane in keep lane we will try to make the care pass from the left
+    // if path not clear, we will prepare to pass by slowing down and moving state to prepare for lane switch
+    // Passing on the right will be done only when we need to pass from the left most lane
+    if(currentLane_ > 0)
     {
-        referenceVelocity_ -= DrivingStateMachine::SPEED_INCREMENT;
+        if(LaneSwitchIsSafe(sensorFusion, car_s, prevPlanLeftover, currentLane_ -1,SAFE_DISTANCE+5
+))
+        {
+           state_ = SWITCH_LANE_LEFT;
+           targetLane_ = currentLane_-1;
+        } 
     }
-    else if(referenceVelocity_ < DrivingStateMachine::MAX_LEGAL_VELOCITY)
+    if(state_ == KEEP_LANE && currentLane_ +1 < numberOfLanes_)
     {
-        referenceVelocity_ += DrivingStateMachine::SPEED_INCREMENT;
+        if(LaneSwitchIsSafe(sensorFusion, car_s, prevPlanLeftover, currentLane_ +1,SAFE_DISTANCE+5
+))
+        {
+            state_ = SWITCH_LANE_RIGHT;
+            targetLane_ = currentLane_+1;
+        }
+
     }
-    
+    if(state_ == KEEP_LANE && !LaneIsClear(sensorFusion, car_s, prevPlanLeftover, currentLane_ -1,SAFE_DISTANCE))
+    {
+        referenceVelocity_ -= SPEED_INCREMENT;  
+    }   
+}
+
+void DrivingStateMachine::HandleObstcaleInSwitching(vector<vector<double>> & sensorFusion, double car_s,double car_d,uint prevPlanLeftover)
+{
+    referenceVelocity_ -= SPEED_INCREMENT;
 }
 
 double DrivingStateMachine::GetTargetVelocity(void) const
