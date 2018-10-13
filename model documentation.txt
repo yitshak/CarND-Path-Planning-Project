@@ -1,0 +1,15 @@
+﻿# Model documentation
+
+As describe in the course, there are two main components for path planning:
+- Behavior selection
+- Trajectory generation
+
+In general, it is recommended to separate  behavior selection from trajectory generation, both in source and in context (behavior selection is invoked less often than trajectory creation). However, for simplicity in this project, I have only separated the modules but their invocation is done from the same context (message sent from simulator).
+
+Once a message is  received from simulator, DrivingStateMachine is updated with sensor fusion data (and other data needed) and makes a decision about whether it is needed to change  lane and accordingly sets :state, target velocity and target lane. 
+
+After this update, our main message handler runs the sequence to generate smooth trajectory which is sent back to the simulator.
+
+## Behavior selection
+
+Behvior selection in this solution uses a very 

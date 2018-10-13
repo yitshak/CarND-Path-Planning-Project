@@ -58,10 +58,11 @@ private:
 
     const double  POINTS_FREQ = 0.02;
     const double  LANE_WIDTH = 4.0; //in meters
-    const double  MAX_LEGAL_VELOCITY = 49.0;
-    const double  SPEED_INCREMENT = 1.0;
+    const double  MAX_LEGAL_VELOCITY = 49.9;
+    const double  SPEED_INCREMENT = 1.5;
     const double  INITIAL_SPPED = 0.0;
     const double  SAFE_DISTANCE = 30; //in meters
+    const double  REAR_SAFTY = 10; //in meters
 
     enum DrivingStates{
         KEEP_LANE,
@@ -96,7 +97,7 @@ void DrivingStateMachine::UpdateSensorFusion(vector<vector<double>> & sensorFusi
     {
          if((car_d<(LANE_WIDTH/2+LANE_WIDTH*targetLane_+LANE_WIDTH/3))&&(car_d>(LANE_WIDTH/2+LANE_WIDTH*targetLane_-LANE_WIDTH/3)))
         {
- 
+            state_=KEEP_LANE;
             currentLane_ = targetLane_;
         }  
      }
@@ -111,14 +112,12 @@ void DrivingStateMachine::UpdateSensorFusion(vector<vector<double>> & sensorFusi
                 // Swirl back to original lane (current lane)
                 // switching back to KEEP LANE state
                 HandleObstcaleInSwitching(sensorFusion, car_s, car_d, prevPlanLeftover);
-                cout << __FUNCTION__ << ":" <<__LINE__<<std::endl;
                 break;
             }
             case DrivingStates::KEEP_LANE:
             {
                 // Reduce speed - move to PREPARE_SWITCH_LANE_
                 // switching back to KEEP LANE state
-                cerr << __FUNCTION__ << ":" <<__LINE__<<std::endl;
                 HandleObstcaleInKeepLane(sensorFusion, car_s, car_d, prevPlanLeftover);
                 break;
             }
@@ -126,10 +125,9 @@ void DrivingStateMachine::UpdateSensorFusion(vector<vector<double>> & sensorFusi
           }
             
     }
-    else if(referenceVelocity_ < DrivingStateMachine::MAX_LEGAL_VELOCITY )
+    else if(referenceVelocity_ < MAX_LEGAL_VELOCITY )
     {
-        cout << __FUNCTION__ << ":" <<__LINE__<<std::endl;
-        referenceVelocity_ += DrivingStateMachine::SPEED_INCREMENT;
+       referenceVelocity_ += min(SPEED_INCREMENT,MAX_LEGAL_VELOCITY-referenceVelocity_);
     }
    
     
@@ -181,7 +179,7 @@ bool DrivingStateMachine::LaneSwitchIsSafe(vector<vector<double>> & sensorFusion
 			check_car_s +=((double)prevPlanLeftover*POINTS_FREQ*check_speed);
 
 			if(((check_car_s> car_s)&& ((check_car_s - car_s) < safeDistance))||
-                    ((check_car_s<= car_s)&& (( car_s- check_car_s) < safeDistance/4)))
+                    ((check_car_s<= car_s)&& (( car_s- check_car_s) < REAR_SAFTY)))
 			{
 				return  false;
 			}
@@ -196,8 +194,7 @@ void DrivingStateMachine::HandleObstcaleInKeepLane(vector<vector<double>> & sens
     // Passing on the right will be done only when we need to pass from the left most lane
     if(currentLane_ > 0)
     {
-        if(LaneSwitchIsSafe(sensorFusion, car_s, prevPlanLeftover, currentLane_ -1,SAFE_DISTANCE+5
-))
+        if(LaneSwitchIsSafe(sensorFusion, car_s, prevPlanLeftover, currentLane_ -1,SAFE_DISTANCE))
         {
            state_ = SWITCH_LANE_LEFT;
            targetLane_ = currentLane_-1;
@@ -205,15 +202,14 @@ void DrivingStateMachine::HandleObstcaleInKeepLane(vector<vector<double>> & sens
     }
     if(state_ == KEEP_LANE && currentLane_ +1 < numberOfLanes_)
     {
-        if(LaneSwitchIsSafe(sensorFusion, car_s, prevPlanLeftover, currentLane_ +1,SAFE_DISTANCE+5
-))
+        if(LaneSwitchIsSafe(sensorFusion, car_s, prevPlanLeftover, currentLane_ +1,SAFE_DISTANCE))
         {
             state_ = SWITCH_LANE_RIGHT;
             targetLane_ = currentLane_+1;
         }
 
     }
-    if(state_ == KEEP_LANE && !LaneIsClear(sensorFusion, car_s, prevPlanLeftover, currentLane_ -1,SAFE_DISTANCE))
+    if(state_ == KEEP_LANE )
     {
         referenceVelocity_ -= SPEED_INCREMENT;  
     }   
