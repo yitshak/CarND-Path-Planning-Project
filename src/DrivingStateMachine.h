@@ -59,7 +59,7 @@ private:
     const double  POINTS_FREQ = 0.02;
     const double  LANE_WIDTH = 4.0; //in meters
     const double  MAX_LEGAL_VELOCITY = 49.9;
-    const double  SPEED_INCREMENT = 1.5;
+    const double  SPEED_INCREMENT = 0.224;
     const double  INITIAL_SPPED = 0.0;
     const double  SAFE_DISTANCE = 30; //in meters
     const double  REAR_SAFTY = 10; //in meters
